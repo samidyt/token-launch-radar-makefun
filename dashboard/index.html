@@ -29,6 +29,7 @@
 <nav class="tabs" aria-label="Views">
   <button class="tab active" data-tab="board" type="button">Board</button>
   <button class="tab" data-tab="live" type="button">Live tokens</button>
+  <button class="tab" data-tab="setaside" type="button">Set aside</button>
   <button class="tab" data-tab="model" type="button">How the model works</button>
 </nav>
 
@@ -77,15 +78,32 @@
   </section>
 
   <section id="tab-live" class="panel">
-    <p class="lede">Protocols whose token already trades. Shown with the market's own values — market cap and
-    TVL — never mixed into the ranked board. These are the live comparables the model calibrates
-    its category multiples from.</p>
+    <p class="lede">Every protocol in the snapshot whose token already trades — all of them, not a top slice.
+    Shown with the market's own values, market cap and TVL, never mixed into the ranked board.
+    The ones with a recorded market cap are the live comparables the model calibrates its
+    category multiples from.</p>
+    <p class="count" id="livecount"></p>
     <div class="table-wrap">
       <table id="livetable">
         <thead>
           <tr><th>Protocol</th><th class="num">Market cap</th><th class="num">TVL</th><th class="num">MCap / TVL</th><th class="num">7d</th></tr>
         </thead>
         <tbody id="liverows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-setaside" class="panel">
+    <p class="lede">Pre-token protocols the board does not rank, each with its reason — listed, not hidden, so
+    every protocol in the snapshot is accounted for. An exchange's token is not a protocol launch,
+    and a versioned pool is a named release of another protocol's pool.</p>
+    <p class="count" id="setasidecount"></p>
+    <div class="table-wrap">
+      <table id="setasidetable">
+        <thead>
+          <tr><th>Protocol</th><th class="num">TVL</th><th class="num">7d</th><th>Why set aside</th></tr>
+        </thead>
+        <tbody id="setasiderows"></tbody>
       </table>
     </div>
   </section>
@@ -113,12 +131,24 @@
         <tbody id="calrows"></tbody>
       </table>
     </div>
+    <h3>Coverage: every protocol accounted for</h3>
+    <p class="lede">The snapshot holds <span id="covtotal"></span> protocols at or above $5M TVL. The radar
+    accounts for every one of them — ranked, live, or set aside with a reason — so nothing in the
+    snapshot goes unexamined.</p>
+    <div class="table-wrap narrow">
+      <table id="covtable">
+        <thead><tr><th>Where it sits</th><th class="num">Protocols</th><th>What it means</th></tr></thead>
+        <tbody id="covrows"></tbody>
+      </table>
+    </div>
     <h3>What the radar does not do</h3>
     <ul class="notes">
       <li>It does not predict whether or when a protocol issues a token. A high implied value means the
       launch would be worth a lot <em>if</em> the protocol's record stayed as it is — nothing more.</li>
       <li>It says a protocol <em>records</em> no token, never that it has none: a DefiLlama record can
-      miss a token, and wrapped, staked or bridged products of tokens that already trade are left out.</li>
+      miss a token, and wrapped, staked or bridged products of tokens that already trade are left out
+      of the board's claims. The Set aside tab lists the pre-token protocols the board does not rank,
+      each with its reason.</li>
       <li>Farm plans are generic steps derived from each protocol's category, chains, TVL and age. They
       are not financial advice; check the protocol's own pages before moving funds.</li>
     </ul>

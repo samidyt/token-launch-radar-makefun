@@ -58,15 +58,16 @@
   document.getElementById('source').textContent = 'DefiLlama' + (fetched ? ' · fetched ' + fetched[1] : '');
   document.getElementById('modelver').textContent = D.model_version;
   document.getElementById('globalmed').textContent =
-    'Global median multiple across ' + D.live_size + ' live comparables shown: ×' + D.global_median_multiple.toFixed(3) + '.';
+    'Global median multiple across ' + D.calibration_comps + ' live comparables with a recorded market cap: ×' + D.global_median_multiple.toFixed(3) + '.';
 
   var totalImplied = D.rows.reduce(function (sum, r) { return sum + r.implied_value_usd; }, 0);
   var watchRows = D.rows.filter(function (r) { return r.watchlist; }).length;
   document.getElementById('stats').innerHTML =
-    stat('Protocols scanned', String(D.protocols_scanned), 'at or above $5M TVL') +
+    stat('Protocols accounted for', String(D.accounted_for),
+      D.board_size + ' ranked · ' + D.live_size + ' live · ' + D.set_aside_size + ' set aside', true) +
     stat('Watchlist', String(D.watchlist_size), '≥ $50M TVL, records no token') +
     stat('Board rows', String(D.board_size), watchRows + ' watchlist + ' + D.early_size + ' more') +
-    stat('Total implied value', money(totalImplied), 'across the whole board', true) +
+    stat('Total implied value', money(totalImplied), 'across the whole board') +
     stat('Model', D.model_version, 'category-calibrated, snapshot-derived');
   function stat(k, v, s, accent) {
     return '<div class="stat"><div class="k">' + esc(k) + '</div><div class="v' + (accent ? ' accent' : '') + '">' +
@@ -232,6 +233,33 @@
     return '<tr><td>' + esc(c.category) + '</td><td class="num">×' + c.multiple.toFixed(3) + '</td><td class="num">' + c.comps + '</td></tr>';
   }).join('');
 
+  // The live view carries every live-token protocol; the set-aside view every pre-token protocol
+  // the board does not rank, with its reason; the coverage table is the whole accounting.
+  document.getElementById('livecount').textContent =
+    'Showing all ' + D.live.length + ' protocols whose token already trades.';
+  document.getElementById('setasidecount').textContent =
+    'Showing all ' + D.set_aside.length + ' pre-token protocols the board does not rank.';
+  document.getElementById('setasiderows').innerHTML = D.set_aside.map(function (p) {
+    var why = p.reason === 'exchange'
+      ? 'Exchange — a centralised exchange token is not a protocol launch'
+      : 'Versioned pool — a versioned release of another protocol';
+    return '<tr><td><span class="name">' + esc(p.name) + '</span><br><span class="slug">' + esc(p.slug) + '</span>' +
+      (p.category ? '<br><span class="badge">' + esc(p.category) + '</span>' : '') + '</td>' +
+      '<td class="num">' + money(p.tvl_usd) + '</td>' +
+      '<td class="num ' + pctClass(p.change_7d) + '">' + pct(p.change_7d) + '</td>' +
+      '<td>' + esc(why) + '</td></tr>';
+  }).join('');
+
+  document.getElementById('covtotal').textContent = String(D.accounted_for);
+  document.getElementById('covrows').innerHTML =
+    covRow('Ranked board', D.board_size, 'Pre-token, ranked by implied launch value, with a farm plan each.') +
+    covRow('Live tokens', D.live_size, 'Token already trades; shown with market values.') +
+    covRow('Set aside', D.set_aside_size, 'Pre-token but not rankable — an exchange or a versioned pool — with its reason.') +
+    covRow('Accounted for', D.accounted_for, 'Every protocol in the snapshot, in exactly one of the three groups above.');
+  function covRow(k, v, s) {
+    return '<tr><td>' + esc(k) + '</td><td class="num">' + v + '</td><td>' + esc(s) + '</td></tr>';
+  }
+
   // ---------------------------------------------------------------- controls + hash routing
 
   document.getElementById('q').addEventListener('input', function (e) { state.q = e.target.value; renderBoard(); });
@@ -267,7 +295,7 @@
       if (k === 'chain' && v) { state.chain = v; chainSel.value = v; }
       if (k === 'watch' && v === '1') { state.watchOnly = true; document.getElementById('watchonly').checked = true; }
       if (k === 'q' && v) { state.q = v; document.getElementById('q').value = v; }
-      if (k === 'tab' && (v === 'live' || v === 'model')) showTab(v);
+      if (k === 'tab' && (v === 'live' || v === 'model' || v === 'setaside')) showTab(v);
     });
   }
 

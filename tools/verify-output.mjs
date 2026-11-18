@@ -151,6 +151,31 @@ function jpegDims(buf) {
     err ?? `dossier.json ${written.length} bytes, ${match ? 'byte-identical to a fresh buildDossier' : 'DIFFERS from a fresh buildDossier'}`);
 }
 
+// 8. accounting (this entry's own check, not a gate row): data.js accounts for every protocol
+//    in the snapshot exactly once — the ranked board, the live view, or the set-aside list.
+{
+  const script = readFileSync(join(out, 'data.js'), 'utf8');
+  const prefix = 'window.RADAR=';
+  let bad = null;
+  let detail = '';
+  if (!script.startsWith(prefix)) {
+    bad = 'data.js does not start with window.RADAR=';
+  } else {
+    const radar = JSON.parse(script.slice(prefix.length).replace(/;\s*$/, ''));
+    const total = radar.rows.length + radar.live.length + radar.set_aside.length;
+    const slugs = new Set([
+      ...radar.rows.map((r) => r.slug),
+      ...radar.live.map((r) => r.slug),
+      ...radar.set_aside.map((r) => r.slug),
+    ]);
+    detail = `${total} accounted for (${radar.rows.length} ranked, ${radar.live.length} live, ${radar.set_aside.length} set aside) of ${snapshot.protocols.length}`;
+    if (total !== snapshot.protocols.length) bad = `accounts for ${total} of ${snapshot.protocols.length}`;
+    else if (slugs.size !== total) bad = 'a slug appears in more than one group';
+    else if (radar.accounted_for !== total) bad = `accounted_for says ${radar.accounted_for}, groups sum to ${total}`;
+  }
+  row('accounting', bad === null, bad ?? detail);
+}
+
 const failed = results.filter((r) => !r.ok);
-console.log(failed.length === 0 ? `\n7/7 gate rows pass.` : `\n${7 - failed.length}/7 gate rows pass.`);
+console.log(failed.length === 0 ? `\n${results.length}/${results.length} rows pass (7 gate rows + accounting).` : `\n${results.length - failed.length}/${results.length} rows pass.`);
 process.exit(failed.length === 0 ? 0 : 1);

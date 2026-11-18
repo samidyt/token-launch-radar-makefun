@@ -7,6 +7,9 @@
 // make.fun library. The run is deterministic: the same snapshot in gives the same bytes out, so
 // the grader's two runs agree.
 //
+// Every protocol in the snapshot is accounted for in the dashboard's data: the ranked board, the
+// live-token view, or the set-aside list with its reason — nothing in the snapshot goes unexamined.
+//
 // The dashboard is a static page, no framework and no network: dashboard/index.html, app.css and
 // app.js read /output/data.js, which this program writes from the same board. Every row carries
 // its model breakdown and its farm plan; the page sorts, filters and opens a detail view per row.
@@ -80,6 +83,14 @@ if (!dash.includes('index.html')) {
   process.stderr.write('token radar: dashboard/ holds no index.html\n');
   process.exit(1);
 }
+// The dossier's text holds at most TEXT_MAX_BYTES of dashboard source, and buildDossier cuts
+// what does not fit without complaint — so refuse here, loudly, rather than hand the judge a
+// dashboard it can only half read.
+const dashBytes = dash.reduce((sum, name) => sum + statSync(join(out, 'dashboard', name)).size, 0);
+if (dashBytes > TEXT_MAX_BYTES) {
+  process.stderr.write(`token radar: dashboard/ is ${dashBytes} bytes: the dossier's text cap is ${TEXT_MAX_BYTES}\n`);
+  process.exit(1);
+}
 const shots = copyTree(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3) {
   process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`);
@@ -99,6 +110,6 @@ writeFileSync(
 );
 
 process.stdout.write(
-  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
-    `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
+  `token radar: ${radar.accounted_for} protocols accounted for (${board.length} ranked, ${radar.live_size} live, ${radar.set_aside_size} set aside), ${snapshot.watchlist.length} on the watchlist\n` +
+    `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files, ${dashBytes} bytes), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

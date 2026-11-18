@@ -4,6 +4,8 @@
 // rankable pre-token protocol in the snapshot: the early rows the radar exists to find. A protocol is
 // pre-token when its record carries no token (no market cap, no CoinGecko id, no symbol). Live-token
 // protocols are kept apart and shown with the market's own values, never mixed into the ranked board.
+// Every protocol in the snapshot is accounted for somewhere: the ranked board, the live-token view, or
+// the set-aside list (pre-token protocols the board does not rank, each with its reason stated).
 //
 // Implied value follows only from the snapshot's own figures, in four factors:
 //
@@ -78,10 +80,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-2';
-
-/** How many live-token protocols the Live token view carries, by market cap. */
-export const LIVE_ROWS = 24;
+export const MODEL_VERSION = 'radar-3';
 
 /** A farm step: the action, what it costs, and how long it takes. */
 export interface FarmStep {
@@ -149,6 +148,17 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
+/** A pre-token protocol the board does not rank, with the reason it is set aside. */
+export interface SetAsideRow {
+  slug: string;
+  name: string;
+  category: string | null;
+  chains: string[];
+  tvl_usd: number;
+  change_7d: number | null;
+  reason: 'exchange' | 'versioned pool';
+}
+
 /** One category's calibrated multiple, for the dashboard's model section. */
 export interface CalibrationRow {
   category: string;
@@ -156,7 +166,7 @@ export interface CalibrationRow {
   comps: number;
 }
 
-/** Everything the dashboard needs: the board, the live set, the calibration and the model it runs. */
+/** Everything the dashboard needs: the board, the live set, the set-aside list, the calibration and the model it runs. */
 export interface RadarData {
   as_of: string;
   source: string;
@@ -165,13 +175,18 @@ export interface RadarData {
   model_version: string;
   global_median_multiple: number;
   calibration: CalibrationRow[];
+  calibration_comps: number;
   protocols_scanned: number;
   watchlist_size: number;
   board_size: number;
   early_size: number;
   live_size: number;
+  pre_token_size: number;
+  set_aside_size: number;
+  accounted_for: number;
   rows: RadarRow[];
   live: LiveRow[];
+  set_aside: SetAsideRow[];
 }
 
 /** Why the snapshot is not one this model can score. */
@@ -462,12 +477,15 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   ];
 }
 
-/** The live-token protocols, by market cap, for the dashboard's Live token view. */
+/**
+ * Every live-token protocol in the snapshot, by market cap, for the dashboard's Live token view:
+ * all of them, not a top slice, so the live set is accounted for in full. Protocols with no
+ * recorded market cap sort last, by TVL.
+ */
 export function liveRows(snapshot: Snapshot): LiveRow[] {
   return snapshot.protocols
-    .filter((p) => !isPreToken(p) && p.category !== 'CEX')
+    .filter((p) => !isPreToken(p))
     .sort((a, b) => (b.mcap_usd ?? 0) - (a.mcap_usd ?? 0) || b.tvl_usd - a.tvl_usd)
-    .slice(0, LIVE_ROWS)
     .map((p) => ({
       slug: p.slug,
       name: p.name,
@@ -476,6 +494,35 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
       tvl_usd: p.tvl_usd,
       mcap_usd: p.mcap_usd,
       change_7d: p.change_7d,
+    }));
+}
+
+/** Why a pre-token protocol is not rankable, if it is not: an exchange, or a versioned pool. */
+export function setAsideReason(p: SnapshotProtocol): 'exchange' | 'versioned pool' | null {
+  if (p.category === 'CEX') return 'exchange';
+  if (VERSIONED.test(p.name)) return 'versioned pool';
+  return null;
+}
+
+/**
+ * The pre-token protocols the board does not rank, each with its reason: exchanges (a centralised
+ * exchange's token is not a protocol launch) and versioned pools (a named release of another
+ * protocol's pool). Listed, not hidden, so the snapshot is accounted for in full.
+ */
+export function setAsideRows(snapshot: Snapshot): SetAsideRow[] {
+  return snapshot.protocols
+    .filter((p) => isPreToken(p) && !isRankable(p))
+    .sort((a, b) => b.tvl_usd - a.tvl_usd)
+    .map((p) => ({
+      slug: p.slug,
+      name: p.name,
+      category: p.category,
+      chains: p.chains,
+      tvl_usd: p.tvl_usd,
+      change_7d: p.change_7d,
+      // The filter guarantees a reason: a pre-token protocol is unrankable only as an exchange
+      // or a versioned pool.
+      reason: setAsideReason(p)!,
     }));
 }
 
@@ -508,11 +555,26 @@ export function buildRadar(
 ): { board: BoardRow[]; radar: RadarData } {
   const { board, calibration } = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
+  const setAside = setAsideRows(snapshot);
   const watchSet = new Set(snapshot.watchlist);
   const early = board.filter((r) => !watchSet.has(r.slug)).length;
+  const preToken = snapshot.protocols.filter(isPreToken).length;
+  // The protocols the calibration actually used: live-token, with a market cap and TVL at or
+  // above the minimum. (The live view shows every live-token protocol; only these calibrate.)
+  const calibrationComps = snapshot.protocols.filter(
+    (p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd >= model.min_comp_tvl,
+  ).length;
   const calibrationRows: CalibrationRow[] = [...calibration.multiples.entries()]
     .map(([category, v]) => ({ category, multiple: round4(v.multiple), comps: v.comps }))
     .sort((a, b) => (a.category < b.category ? -1 : 1));
+  // The accounting is a partition, checked, not claimed: every protocol in the snapshot sits in
+  // exactly one of the ranked board, the live view, or the set-aside list.
+  const accountedFor = board.length + live.length + setAside.length;
+  if (accountedFor !== snapshot.protocols.length) {
+    throw new SnapshotError(
+      `the radar accounts for ${accountedFor} protocols of the snapshot's ${snapshot.protocols.length}: ${board.length} ranked, ${live.length} live, ${setAside.length} set aside`,
+    );
+  }
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -521,13 +583,18 @@ export function buildRadar(
     model_version: MODEL_VERSION,
     global_median_multiple: round4(calibration.globalMedian),
     calibration: calibrationRows,
+    calibration_comps: calibrationComps,
     protocols_scanned: snapshot.protocols.length,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: early,
     live_size: live.length,
+    pre_token_size: preToken,
+    set_aside_size: setAside.length,
+    accounted_for: accountedFor,
     rows: board.map((r) => radarRow(r, watchSet)),
     live,
+    set_aside: setAside,
   };
   return { board, radar };
 }
