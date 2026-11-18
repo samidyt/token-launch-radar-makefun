@@ -1,11 +1,13 @@
-// Replicates the token-radar-01 gate's seven rows against a built /output, locally.
-// The server grades every entry (RULES.txt: "There is no local grade"), so this is a
-// pre-submit rehearsal, not the grade: it reads the same files the sealed scorer reads
-// and applies the rules RULES.txt states, including a byte comparison of dossier.json
-// against a fresh buildDossier call with the gate's own caps ({text_max_bytes: 65536}).
+// Replicates the token-radar-01 gate's seven rows against a built /output, locally, plus
+// an eighth row of this entry's own: the snapshot partition (ranked + live-token + set-aside
+// accounts for every protocol, disjoint and complete). The server grades every entry
+// (RULES.txt: "There is no local grade"), so this is a pre-submit rehearsal, not the grade:
+// it reads the same files the sealed scorer reads and applies the rules RULES.txt states,
+// including a byte comparison of dossier.json against a fresh buildDossier call with the
+// gate's own caps ({text_max_bytes: 65536}).
 //
 // Usage: node tools/verify-output.mjs <out-dir> <snapshot.json>
-// Exit 0 when all seven rows pass; prints each row PASS/FAIL with its detail.
+// Exit 0 when all eight rows pass; prints each row PASS/FAIL with its detail.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -151,6 +153,49 @@ function jpegDims(buf) {
     err ?? `dossier.json ${written.length} bytes, ${match ? 'byte-identical to a fresh buildDossier' : 'DIFFERS from a fresh buildDossier'}`);
 }
 
+// 8. partition (this entry's own row, not the gate's): data.js accounts for the whole snapshot —
+//    ranked + live-token + set-aside, disjoint and complete, and the header counts agree.
+{
+  const text = readFileSync(join(out, 'data.js'), 'utf8');
+  const prefix = 'window.RADAR=';
+  let bad = null;
+  let detail = '';
+  if (!text.startsWith(prefix)) {
+    bad = 'data.js does not start with window.RADAR=';
+  } else {
+    const radar = JSON.parse(text.slice(prefix.length).replace(/;\s*$/, ''));
+    const buckets = [
+      ['ranked', radar.rows ?? []],
+      ['live', radar.live ?? []],
+      ['aside', radar.aside ?? []],
+    ];
+    const seen = new Set();
+    for (const [name, arr] of buckets) {
+      for (const r of arr) {
+        if (seen.has(r.slug)) { bad = `${r.slug} in two buckets (${name})`; break; }
+        seen.add(r.slug);
+      }
+      if (bad) break;
+    }
+    if (!bad) {
+      const missing = [...slugSet].filter((s) => !seen.has(s));
+      if (missing.length > 0) bad = `${missing.length} snapshot protocols unaccounted for: ${missing.slice(0, 3).join(', ')}`;
+    }
+    if (!bad && radar.model_version !== 'radar-3') bad = `model_version is ${radar.model_version}, not radar-3`;
+    if (!bad && (radar.board_size !== radar.rows.length || radar.live_size !== radar.live.length ||
+      radar.aside_size !== radar.aside.length || radar.protocols_scanned !== snapshot.protocols.length)) {
+      bad = 'header counts disagree with the bucket lengths';
+    }
+    if (!bad) {
+      const reasons = {};
+      for (const p of radar.aside) reasons[p.reason] = (reasons[p.reason] ?? 0) + 1;
+      detail = `${radar.rows.length} ranked + ${radar.live.length} live + ${radar.aside.length} set aside ` +
+        `(${reasons.exchange ?? 0} exchanges, ${reasons['versioned-pool'] ?? 0} versioned pools) = ${seen.size}/${snapshot.protocols.length}`;
+    }
+  }
+  row('partition', bad === null, bad ?? detail);
+}
+
 const failed = results.filter((r) => !r.ok);
-console.log(failed.length === 0 ? `\n7/7 gate rows pass.` : `\n${7 - failed.length}/7 gate rows pass.`);
+console.log(failed.length === 0 ? `\n8/8 gate rows pass.` : `\n${8 - failed.length}/8 gate rows pass.`);
 process.exit(failed.length === 0 ? 0 : 1);

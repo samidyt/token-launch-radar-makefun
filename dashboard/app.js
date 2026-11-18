@@ -1,8 +1,9 @@
 // Token Radar dashboard: renders window.RADAR (written by main.ts from the sealed snapshot).
 // No framework, no network: sort, filter, search and detail views all run on the local data.
 //
-// Views: the ranked board (sortable, filterable, searchable), the live-token comparables, and
-// the model page, which states the formula and the calibration the snapshot produced.
+// Views: the ranked board (sortable, filterable, searchable), the live-token comparables,
+// the set-aside protocols with a reason each, and the model page, which states the formula
+// and the calibration the snapshot produced.
 (function () {
   'use strict';
   var D = window.RADAR;
@@ -58,16 +59,22 @@
   document.getElementById('source').textContent = 'DefiLlama' + (fetched ? ' · fetched ' + fetched[1] : '');
   document.getElementById('modelver').textContent = D.model_version;
   document.getElementById('globalmed').textContent =
-    'Global median multiple across ' + D.live_size + ' live comparables shown: ×' + D.global_median_multiple.toFixed(3) + '.';
+    'Global median multiple across ' + D.calibration_comps + ' live-token protocols with both a market cap and TVL: ×' +
+    D.global_median_multiple.toFixed(3) + '.';
+  document.getElementById('accounting').textContent =
+    D.board_size + ' ranked + ' + D.live_size + ' live-token + ' + D.aside_size + ' set aside = ' +
+    D.protocols_scanned + ' protocols, every one of the snapshot accounted for.';
 
   var totalImplied = D.rows.reduce(function (sum, r) { return sum + r.implied_value_usd; }, 0);
   var watchRows = D.rows.filter(function (r) { return r.watchlist; }).length;
+  var asideExchanges = D.aside.filter(function (p) { return p.reason === 'exchange'; }).length;
+  var asideVersioned = D.aside.length - asideExchanges;
   document.getElementById('stats').innerHTML =
     stat('Protocols scanned', String(D.protocols_scanned), 'at or above $5M TVL') +
-    stat('Watchlist', String(D.watchlist_size), '≥ $50M TVL, records no token') +
-    stat('Board rows', String(D.board_size), watchRows + ' watchlist + ' + D.early_size + ' more') +
-    stat('Total implied value', money(totalImplied), 'across the whole board', true) +
-    stat('Model', D.model_version, 'category-calibrated, snapshot-derived');
+    stat('Ranked board', String(D.board_size), watchRows + ' watchlist + ' + D.early_size + ' more') +
+    stat('Live tokens', String(D.live_size), 'already trading, shown apart') +
+    stat('Set aside', String(D.aside_size), asideExchanges + ' exchanges + ' + asideVersioned + ' versioned pools') +
+    stat('Total implied value', money(totalImplied), 'across the ranked board', true);
   function stat(k, v, s, accent) {
     return '<div class="stat"><div class="k">' + esc(k) + '</div><div class="v' + (accent ? ' accent' : '') + '">' +
       esc(v) + '</div><div class="s">' + esc(s) + '</div></div>';
@@ -216,8 +223,10 @@
     return '<div class="fact"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
   }
 
-  // ---------------------------------------------------------------- live + calibration
+  // ---------------------------------------------------------------- live + set-aside + calibration
 
+  document.getElementById('livecount').textContent =
+    'All ' + D.live.length + ' of them, by market cap.';
   document.getElementById('liverows').innerHTML = D.live.map(function (p) {
     var ratio = (p.mcap_usd !== null && p.tvl_usd) ? (p.mcap_usd / p.tvl_usd).toFixed(2) + '×' : '—';
     return '<tr><td><span class="name">' + esc(p.name) + '</span><br><span class="slug">' + esc(p.slug) + '</span>' +
@@ -226,6 +235,19 @@
       '<td class="num">' + money(p.tvl_usd) + '</td>' +
       '<td class="num">' + ratio + '</td>' +
       '<td class="num ' + pctClass(p.change_7d) + '">' + pct(p.change_7d) + '</td></tr>';
+  }).join('');
+
+  function asideReasonText(reason) {
+    if (reason === 'exchange') return 'Centralised exchange — lists other protocols\u2019 tokens; not a launch candidate.';
+    return 'Versioned pool (V2, V3, 2.0) — a release of another product, not a standalone protocol.';
+  }
+  document.getElementById('asidecount').textContent =
+    'All ' + D.aside.length + ' of them, by TVL.';
+  document.getElementById('asiderows').innerHTML = D.aside.map(function (p) {
+    return '<tr><td><span class="name">' + esc(p.name) + '</span><br><span class="slug">' + esc(p.slug) + '</span>' +
+      (p.category ? '<br><span class="badge">' + esc(p.category) + '</span>' : '') + '</td>' +
+      '<td class="num">' + money(p.tvl_usd) + '</td>' +
+      '<td><span class="reason">' + esc(asideReasonText(p.reason)) + '</span></td></tr>';
   }).join('');
 
   document.getElementById('calrows').innerHTML = D.calibration.map(function (c) {
@@ -267,7 +289,7 @@
       if (k === 'chain' && v) { state.chain = v; chainSel.value = v; }
       if (k === 'watch' && v === '1') { state.watchOnly = true; document.getElementById('watchonly').checked = true; }
       if (k === 'q' && v) { state.q = v; document.getElementById('q').value = v; }
-      if (k === 'tab' && (v === 'live' || v === 'model')) showTab(v);
+      if (k === 'tab' && (v === 'live' || v === 'aside' || v === 'model')) showTab(v);
     });
   }
 

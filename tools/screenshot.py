@@ -38,6 +38,9 @@ try:
         page.goto(base + "#detail=coinbase-bridge", wait_until="domcontentloaded")
         page.reload(wait_until="domcontentloaded")
         page.wait_for_selector("#detail:not([hidden])", timeout=15000)
+        # Frame the shot on the detail view itself: it sits below the full 289-row
+        # table, and scrollIntoView({block: 'nearest'}) leaves the board's tail above it.
+        page.evaluate("document.getElementById('detail').scrollIntoView({block: 'start'})")
         time.sleep(0.8)
         page.screenshot(path=str(SHOTS / "2-detail.png"))
 

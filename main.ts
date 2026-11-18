@@ -8,8 +8,9 @@
 // the grader's two runs agree.
 //
 // The dashboard is a static page, no framework and no network: dashboard/index.html, app.css and
-// app.js read /output/data.js, which this program writes from the same board. Every row carries
-// its model breakdown and its farm plan; the page sorts, filters and opens a detail view per row.
+// app.js read /output/data.js, which this program writes from the same board. Every ranked row
+// carries its model breakdown and its farm plan; the page sorts, filters and opens a detail view
+// per row, and the live-token and set-aside views account for the rest of the snapshot.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
@@ -98,7 +99,28 @@ writeFileSync(
   buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: DASHBOARD_CAPS }),
 );
 
+// Fail fast when the output breaks a gate cap the scorer refuses: an oversized
+// screenshot or dossier would otherwise surface only as a failed submission.
+const dossierBytes = statSync(join(out, 'dossier.json')).size;
+if (dossierBytes > 1_572_864) {
+  process.stderr.write(`token radar: dossier.json is ${dossierBytes} bytes: the gate refuses anything over 1.5 MiB\n`);
+  process.exit(1);
+}
+for (const name of shots) {
+  const size = statSync(join(out, 'screenshots', name)).size;
+  if (size > SCREENSHOT_CAPS.max_bytes) {
+    process.stderr.write(`token radar: screenshots/${name} is ${size} bytes: the gate refuses anything over ${SCREENSHOT_CAPS.max_bytes}\n`);
+    process.exit(1);
+  }
+}
+// The dossier shows only the first TEXT_MAX_BYTES of dashboard source: warn when
+// the source outgrows it, so the truncation is a choice rather than a surprise.
+const dashBytes = dash.reduce((sum, name) => sum + statSync(join(out, 'dashboard', name)).size, 0);
+if (dashBytes > TEXT_MAX_BYTES) {
+  process.stderr.write(`token radar: warning: dashboard source is ${dashBytes} bytes: the dossier shows only the first ${TEXT_MAX_BYTES}\n`);
+}
+
 process.stdout.write(
-  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
+  `token radar: ${snapshot.protocols.length} protocols accounted for (${board.length} ranked, ${radar.live_size} live-token, ${radar.aside_size} set aside), ${snapshot.watchlist.length} on the watchlist\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

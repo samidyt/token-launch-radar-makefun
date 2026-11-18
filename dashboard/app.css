@@ -176,6 +176,7 @@ tbody tr:last-child td { border-bottom: none; }
   white-space: nowrap;
 }
 .badge.watch { border-color: var(--amber); color: var(--amber); }
+.reason { color: var(--muted); font-size: 13px; }
 .up { color: var(--green); }
 .down { color: var(--red); }
 .flat { color: var(--muted); }
