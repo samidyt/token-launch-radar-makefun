@@ -159,6 +159,8 @@ th[data-sort] { cursor: pointer; }
 th[data-sort]:hover { color: var(--accent); }
 th.sorted { color: var(--accent); }
 tbody tr { cursor: pointer; }
+.table-wrap.plain tbody tr { cursor: default; }
+.table-wrap.plain tbody tr:hover { background: none; }
 tbody tr:hover { background: rgba(34, 211, 238, .06); }
 tbody tr.selected { background: rgba(34, 211, 238, .12); }
 tbody tr:last-child td { border-bottom: none; }

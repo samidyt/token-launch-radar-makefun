@@ -5,6 +5,12 @@
 // pre-token when its record carries no token (no market cap, no CoinGecko id, no symbol). Live-token
 // protocols are kept apart and shown with the market's own values, never mixed into the ranked board.
 //
+// radar-3 adds the whole-universe accounting radar-2 lacked: every protocol in the snapshot lands in
+// exactly one of three buckets — ranked, live-token, or set aside with a stated reason — and the
+// partition is asserted at runtime, so no protocol is silently dropped. The ranking formula itself is
+// unchanged from radar-2: the same function scores every row, and the dashboard states every factor
+// of every row so a reader can check the arithmetic.
+//
 // Implied value follows only from the snapshot's own figures, in four factors:
 //
 //   category multiple  the median market-cap-to-TVL ratio of the snapshot's own live-token
@@ -78,10 +84,30 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-3';
 
-/** How many live-token protocols the Live token view carries, by market cap. */
-export const LIVE_ROWS = 24;
+/** Why a pre-token protocol is set aside instead of ranked: an exchange, or a versioned pool. */
+export type SetAsideReason = 'exchange' | 'versioned';
+
+/** One set-aside protocol: pre-token, but not a launch candidate the board may rank. */
+export interface SetAsideRow {
+  slug: string;
+  name: string;
+  category: string | null;
+  reason: SetAsideReason;
+}
+
+/** The whole-universe partition: every protocol in exactly one bucket, asserted at runtime. */
+export interface Coverage {
+  total: number;
+  ranked: number;
+  live: number;
+  set_aside: number;
+  set_aside_exchange: number;
+  set_aside_versioned: number;
+  live_with_mcap: number;
+  live_no_mcap: number;
+}
 
 /** A farm step: the action, what it costs, and how long it takes. */
 export interface FarmStep {
@@ -138,7 +164,9 @@ export interface RadarRow {
   farm_steps: string[];
 }
 
-/** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
+/** A live-token protocol: it already trades, so the board shows the market's own value, not a model's.
+ *  `symbol` is the recorded ticker when the record carries one; some live records carry a symbol but
+ *  no market cap, and the dashboard says so rather than inventing one. */
 export interface LiveRow {
   slug: string;
   name: string;
@@ -146,6 +174,7 @@ export interface LiveRow {
   chains: string[];
   tvl_usd: number;
   mcap_usd: number | null;
+  symbol: string | null;
   change_7d: number | null;
 }
 
@@ -156,7 +185,10 @@ export interface CalibrationRow {
   comps: number;
 }
 
-/** Everything the dashboard needs: the board, the live set, the calibration and the model it runs. */
+/** Everything the dashboard needs: the board, the live set, the calibration and the model it runs.
+ *  `live` is every protocol whose record carries a token (not a top-N cut), and `set_aside` is every
+ *  pre-token protocol the board does not rank, with its reason — so `coverage` accounts for the whole
+ *  snapshot: ranked + live + set aside = protocols scanned. */
 export interface RadarData {
   as_of: string;
   source: string;
@@ -170,8 +202,10 @@ export interface RadarData {
   board_size: number;
   early_size: number;
   live_size: number;
+  coverage: Coverage;
   rows: RadarRow[];
   live: LiveRow[];
+  set_aside: SetAsideRow[];
 }
 
 /** Why the snapshot is not one this model can score. */
@@ -287,6 +321,64 @@ export function isPreToken(p: SnapshotProtocol): boolean {
 /** Whether a protocol is one the board may rank: pre-token, not an exchange, not a versioned pool. */
 export function isRankable(p: SnapshotProtocol): boolean {
   return isPreToken(p) && p.category !== 'CEX' && !VERSIONED.test(p.name);
+}
+
+/**
+ * Why a pre-token protocol is set aside instead of ranked: an exchange is not a launch candidate,
+ * and a versioned name marks a version of another protocol, not a standalone launch. Exchange takes
+ * precedence: a versioned exchange is still an exchange first. Null for a protocol the board may rank.
+ */
+export function setAsideReason(p: SnapshotProtocol): SetAsideReason | null {
+  if (p.category === 'CEX') return 'exchange';
+  if (VERSIONED.test(p.name)) return 'versioned';
+  return null;
+}
+
+/**
+ * The whole-universe partition of the snapshot, derived from its own records: every protocol not on
+ * the board is either live-token (its record carries a token) or pre-token and set aside with its
+ * reason. A pre-token protocol that is rankable but missing from the board has nowhere to go, so the
+ * partition refuses rather than dropping it silently. Live protocols sort by market cap, a missing
+ * market cap sorting last; set-aside rows sort by slug. The counts are the coverage the dashboard
+ * states and the verifier re-derives from the snapshot.
+ */
+export function partitionSnapshot(
+  snapshot: Snapshot,
+  boardSlugs: Set<string>,
+): { live: SnapshotProtocol[]; setAside: SetAsideRow[]; coverage: Coverage } {
+  const live: SnapshotProtocol[] = [];
+  const setAside: SetAsideRow[] = [];
+  for (const p of snapshot.protocols) {
+    if (boardSlugs.has(p.slug)) continue;
+    if (isPreToken(p)) {
+      const reason = setAsideReason(p);
+      if (reason === null) {
+        throw new Error(
+          `token radar: ${p.slug} is pre-token and rankable but not on the board: the partition leaves it nowhere`,
+        );
+      }
+      setAside.push({ slug: p.slug, name: p.name, category: p.category, reason });
+    } else {
+      live.push(p);
+    }
+  }
+  live.sort((a, b) => {
+    const am = a.mcap_usd === null ? -Infinity : a.mcap_usd;
+    const bm = b.mcap_usd === null ? -Infinity : b.mcap_usd;
+    return bm - am || b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0);
+  });
+  setAside.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+  const coverage: Coverage = {
+    total: snapshot.protocols.length,
+    ranked: boardSlugs.size,
+    live: live.length,
+    set_aside: setAside.length,
+    set_aside_exchange: setAside.filter((r) => r.reason === 'exchange').length,
+    set_aside_versioned: setAside.filter((r) => r.reason === 'versioned').length,
+    live_with_mcap: live.filter((p) => p.mcap_usd !== null).length,
+    live_no_mcap: live.filter((p) => p.mcap_usd === null).length,
+  };
+  return { live, setAside, coverage };
 }
 
 /** The snapshot's protocol by slug. */
@@ -462,21 +554,23 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   ];
 }
 
-/** The live-token protocols, by market cap, for the dashboard's Live token view. */
-export function liveRows(snapshot: Snapshot): LiveRow[] {
-  return snapshot.protocols
-    .filter((p) => !isPreToken(p) && p.category !== 'CEX')
-    .sort((a, b) => (b.mcap_usd ?? 0) - (a.mcap_usd ?? 0) || b.tvl_usd - a.tvl_usd)
-    .slice(0, LIVE_ROWS)
-    .map((p) => ({
-      slug: p.slug,
-      name: p.name,
-      category: p.category,
-      chains: p.chains,
-      tvl_usd: p.tvl_usd,
-      mcap_usd: p.mcap_usd,
-      change_7d: p.change_7d,
-    }));
+/**
+ * The live-token protocols as dashboard rows, every one of them: the partition's live list, already
+ * sorted by market cap. A protocol whose record carries a token is live whether or not a market cap
+ * is recorded — 272 of this snapshot's live records carry no market cap — so the row keeps the
+ * ticker and the dashboard says plainly when no market cap is recorded, instead of inventing one.
+ */
+export function liveRows(live: SnapshotProtocol[]): LiveRow[] {
+  return live.map((p) => ({
+    slug: p.slug,
+    name: p.name,
+    category: p.category,
+    chains: p.chains,
+    tvl_usd: p.tvl_usd,
+    mcap_usd: p.mcap_usd,
+    symbol: p.symbol,
+    change_7d: p.change_7d,
+  }));
 }
 
 /** A board row's compact form for data.js, with its farm plan attached. */
@@ -501,13 +595,22 @@ export function radarRow(row: BoardRow, watchlist: Set<string>): RadarRow {
   };
 }
 
-/** Everything the dashboard renders, from the snapshot. */
+/** Everything the dashboard renders, from the snapshot. The partition is asserted here: ranked +
+ *  live + set aside must be every protocol in the snapshot, and the board must be exactly the ranked
+ *  bucket — a build that drops a protocol, or ranks one it set aside, refuses instead of shipping. */
 export function buildRadar(
   snapshot: Snapshot,
   model: ModelConstants = MODEL,
 ): { board: BoardRow[]; radar: RadarData } {
   const { board, calibration } = buildBoard(snapshot, model);
-  const live = liveRows(snapshot);
+  const boardSlugs = new Set(board.map((r) => r.slug));
+  const { live, setAside, coverage } = partitionSnapshot(snapshot, boardSlugs);
+  if (coverage.ranked + coverage.live + coverage.set_aside !== coverage.total) {
+    throw new Error(
+      `token radar: the partition does not add up: ${coverage.ranked} ranked + ${coverage.live} live + ${coverage.set_aside} set aside != ${coverage.total} protocols`,
+    );
+  }
+  const liveOut = liveRows(live);
   const watchSet = new Set(snapshot.watchlist);
   const early = board.filter((r) => !watchSet.has(r.slug)).length;
   const calibrationRows: CalibrationRow[] = [...calibration.multiples.entries()]
@@ -525,9 +628,11 @@ export function buildRadar(
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: early,
-    live_size: live.length,
+    live_size: liveOut.length,
+    coverage,
     rows: board.map((r) => radarRow(r, watchSet)),
-    live,
+    live: liveOut,
+    set_aside: setAside,
   };
   return { board, radar };
 }

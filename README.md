@@ -16,15 +16,17 @@ and writes to `/output` (or `MAKEFUN_OUTPUT_DIR`):
 
 - `board.json` — the ranked board: 289 rows on this snapshot, every one of the snapshot's
   40 watchlist protocols covered, each row with a 7-step farm plan.
-- `data.js` — the same board, compact, for the dashboard.
+- `data.js` — the board, the live-token list and the set-aside list, compact, for the dashboard.
 - `dashboard/` — a static page (no framework, no network): sortable, filterable, searchable
-  board; a detail view per protocol with the model arithmetic and the farm plan; the live-token
-  comparables; and a page stating the model and its calibration in full.
+  board; a detail view per protocol with the model arithmetic and the farm plan; every
+  live-token protocol with the market's own values; a Coverage view that accounts for all 758
+  protocols in the snapshot (289 ranked + 416 live-token + 53 set aside with reasons); and a
+  page stating the model and its calibration in full.
 - `screenshots/` — three captures of the dashboard: the board, a detail view, a filtered view.
 - `dossier.json` — built with the vendored `vendor/makefun-board.ts`, byte-identical to what
   the gate rebuilds.
 
-## The model (radar-2)
+## The model (radar-3)
 
 One formula scores every row; no protocol is special-cased:
 
@@ -46,6 +48,21 @@ finds the board exists for. "Records no token" is the snapshot's own wording —
 miss a token, and wrapped, staked or bridged products of tokens that already trade are left
 out of the board's claims.
 
+## Coverage — the whole snapshot, accounted for
+
+radar-3's change over radar-2 is accounting, not a new ranking: the ranking formula is
+unchanged, and the board it produces is byte-identical to radar-2's. What changed is that no
+protocol is silently dropped any more. Every protocol in the snapshot lands in exactly one
+bucket, and the build asserts the partition at runtime (`buildRadar` refuses to ship unless
+ranked + live + set aside = protocols scanned; `tools/verify-output.mjs` re-derives it from
+the snapshot as its eighth row):
+
+| Bucket | On this snapshot | What it is |
+| --- | --- | --- |
+| Ranked | 289 | Pre-token, not an exchange, not a versioned pool. The board. |
+| Live-token | 416 | The record carries a token (a market cap, a CoinGecko id, or a symbol). Shown with the market's own values, never mixed into the board. 144 record a market cap; 272 record a token but no market cap. |
+| Set aside | 53 | Pre-token, but not ranked: 42 centralised exchanges and 11 versioned pools, each listed on the Coverage tab with its reason. |
+
 Farm plans are generic steps derived from each protocol's category, chains, TVL and age —
 with a cost and a time for every step. They are not financial advice.
 
@@ -62,17 +79,19 @@ same bytes out.
 
 ```
 main.ts                  entrypoint: read the snapshot, write /output
-lib/model.ts             the radar-2 model, the snapshot parser, the farm plans
+lib/model.ts             the radar-3 model, the snapshot parser, the farm plans, the partition
 dashboard/               index.html, app.css, app.js — the static dashboard
 screenshots/             1-board.png, 2-detail.png, 3-filtered.png
 vendor/makefun-board.ts  the kit's dossier library, vendored unchanged
 tools/screenshot.py      recaptures screenshots/ from a built output (Camoufox)
+tools/browser-check.py   renders every dashboard view in a real browser, fails on any JS error
+tools/verify-output.mjs  gate rehearsal: the gate's seven rows plus the partition row (8/8)
 ```
 
 ## Screenshots
 
 Captured at 1440×900 from a real run of this entry on the kit snapshot
-(`tools/screenshot.py <out-dir> <shots-dir>`); each is 138–169 KB, inside the gate's
+(`tools/screenshot.py <out-dir> <shots-dir>`); each is 119–133 KB, inside the gate's
 512 KiB cap and the dossier's 1.5 MiB budget.
 
 ## Honest limits
@@ -85,3 +104,7 @@ Captured at 1440×900 from a real run of this entry on the kit snapshot
 - Farm plans are category templates, not protocol-specific research; a plan's first chain
   or first action may fit its protocol loosely.
 - The dashboard is a static snapshot: it does not update, and it never fetches live data.
+- The snapshot itself has quirks the entry shows as recorded rather than smoothing over:
+  272 of the 416 live-token protocols record a token but no market cap, and one
+  (`autofinance`) records a market cap of −$1. Its live row shows −$1; the calibration only
+  uses protocols with a positive market cap, so it is unaffected.

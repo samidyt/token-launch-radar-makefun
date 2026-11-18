@@ -1,11 +1,16 @@
 // A token-radar-01 entry (Node 22, standard library only).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores
-// every rankable pre-token protocol with the model in lib/model.ts, writes the ranked board to
-// /output/board.json and the dashboard's data to /output/data.js, copies this repository's
+// every rankable pre-token protocol with the model in lib/model.ts (radar-3), writes the ranked board
+// to /output/board.json and the dashboard's data to /output/data.js, copies this repository's
 // dashboard/ and screenshots/ to /output, and writes /output/dossier.json with the vendored
 // make.fun library. The run is deterministic: the same snapshot in gives the same bytes out, so
 // the grader's two runs agree.
+//
+// radar-3 accounts for the whole snapshot: the board ranks the rankable pre-token protocols, the
+// dashboard's Live view carries every protocol whose record carries a token, and the Coverage view
+// lists every pre-token protocol set aside with its reason. buildRadar asserts the partition —
+// ranked + live + set aside = protocols scanned — and refuses to ship a build that drops one.
 //
 // The dashboard is a static page, no framework and no network: dashboard/index.html, app.css and
 // app.js read /output/data.js, which this program writes from the same board. Every row carries
@@ -98,7 +103,9 @@ writeFileSync(
   buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: DASHBOARD_CAPS }),
 );
 
+const c = radar.coverage;
 process.stdout.write(
-  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
+  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${c.live} live-token, ${c.set_aside} set aside: ${c.set_aside_exchange} exchanges, ${c.set_aside_versioned} versioned)\n` +
+    `token radar: partition ${c.ranked} ranked + ${c.live} live + ${c.set_aside} set aside = ${c.total} protocols\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

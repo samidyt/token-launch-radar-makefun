@@ -1,8 +1,9 @@
-// Replicates the token-radar-01 gate's seven rows against a built /output, locally.
-// The server grades every entry (RULES.txt: "There is no local grade"), so this is a
-// pre-submit rehearsal, not the grade: it reads the same files the sealed scorer reads
-// and applies the rules RULES.txt states, including a byte comparison of dossier.json
-// against a fresh buildDossier call with the gate's own caps ({text_max_bytes: 65536}).
+// Replicates the token-radar-01 gate's seven rows against a built /output, locally, plus an
+// eighth row of this entry's own: the whole-universe partition (ranked + live + set aside = the
+// snapshot's protocols, re-derived from the snapshot). The server grades every entry (RULES.txt:
+// "There is no local grade"), so this is a pre-submit rehearsal, not the grade: it reads the same
+// files the sealed scorer reads and applies the rules RULES.txt states, including a byte comparison
+// of dossier.json against a fresh buildDossier call with the gate's own caps ({text_max_bytes: 65536}).
 //
 // Usage: node tools/verify-output.mjs <out-dir> <snapshot.json>
 // Exit 0 when all seven rows pass; prints each row PASS/FAIL with its detail.
@@ -151,6 +152,63 @@ function jpegDims(buf) {
     err ?? `dossier.json ${written.length} bytes, ${match ? 'byte-identical to a fresh buildDossier' : 'DIFFERS from a fresh buildDossier'}`);
 }
 
+// 8. partition: the dashboard's data accounts for the whole snapshot — the board's rows are
+//    exactly the rankable pre-token protocols, the live list is exactly the protocols whose record
+//    carries a token, the set-aside list is exactly the pre-token protocols the board does not
+//    rank, each with the reason the rule gives, and ranked + live + set aside = protocols scanned.
+//    The partition is re-derived here from the snapshot, not trusted from data.js.
+{
+  const dataText = readFileSync(join(out, 'data.js'), 'utf8');
+  const prefix = 'window.RADAR=';
+  let radar = null;
+  let bad = null;
+  if (!dataText.startsWith(prefix) || !dataText.trimEnd().endsWith(';')) {
+    bad = 'data.js is not a window.RADAR assignment';
+  } else {
+    try {
+      radar = JSON.parse(dataText.slice(prefix.length).trimEnd().slice(0, -1));
+    } catch {
+      bad = 'data.js does not parse';
+    }
+  }
+  if (radar !== null) {
+    const VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
+    const isPre = (p) => p.mcap_usd === null && p.gecko_id === null && p.symbol === null;
+    const isRankable = (p) => isPre(p) && p.category !== 'CEX' && !VERSIONED.test(p.name);
+    const expectedRanked = new Set(snapshot.protocols.filter(isRankable).map((p) => p.slug));
+    const expectedLive = new Set(snapshot.protocols.filter((p) => !isPre(p)).map((p) => p.slug));
+    const expectedAside = new Map(
+      snapshot.protocols
+        .filter((p) => isPre(p) && !isRankable(p))
+        .map((p) => [p.slug, p.category === 'CEX' ? 'exchange' : 'versioned']),
+    );
+    const cov = radar.coverage;
+    const boardSlugs = new Set(board.map((r) => r.slug));
+    const liveSlugs = new Set((radar.live ?? []).map((p) => p.slug));
+    const asideSlugs = new Set((radar.set_aside ?? []).map((p) => p.slug));
+    const sameSet = (a, b) => a.size === b.size && [...a].every((s) => b.has(s));
+    const asideReasonsOk = (radar.set_aside ?? []).every((p) => expectedAside.get(p.slug) === p.reason);
+    const disjoint =
+      [...boardSlugs].every((s) => !liveSlugs.has(s) && !asideSlugs.has(s)) &&
+      [...liveSlugs].every((s) => !asideSlugs.has(s));
+    if (!cov) bad = 'data.js carries no coverage';
+    else if (cov.total !== snapshot.protocols.length) bad = `coverage.total ${cov.total} != ${snapshot.protocols.length} protocols`;
+    else if (cov.ranked + cov.live + cov.set_aside !== cov.total) bad = `partition ${cov.ranked} + ${cov.live} + ${cov.set_aside} != ${cov.total}`;
+    else if (!sameSet(boardSlugs, expectedRanked)) bad = 'the board is not exactly the rankable pre-token set';
+    else if (!sameSet(liveSlugs, expectedLive)) bad = 'the live list is not exactly the token-carrying set';
+    else if (!sameSet(asideSlugs, new Set(expectedAside.keys()))) bad = 'the set-aside list is not exactly the pre-token non-rankable set';
+    else if (!asideReasonsOk) bad = 'a set-aside row carries the wrong reason';
+    else if (!disjoint) bad = 'a slug sits in two buckets';
+    else if (radar.live.length !== cov.live || radar.set_aside.length !== cov.set_aside || radar.rows.length !== cov.ranked) {
+      bad = 'coverage counts disagree with the lists they describe';
+    }
+  }
+  row('partition', bad === null, bad ?? (() => {
+    const cov = radar.coverage;
+    return `${cov.ranked} ranked + ${cov.live} live + ${cov.set_aside} set aside = ${cov.total} protocols`;
+  })());
+}
+
 const failed = results.filter((r) => !r.ok);
-console.log(failed.length === 0 ? `\n7/7 gate rows pass.` : `\n${7 - failed.length}/7 gate rows pass.`);
+console.log(failed.length === 0 ? `\n${results.length}/${results.length} gate rows pass.` : `\n${results.length - failed.length}/${results.length} gate rows pass.`);
 process.exit(failed.length === 0 ? 0 : 1);

@@ -1,8 +1,10 @@
 // Token Radar dashboard: renders window.RADAR (written by main.ts from the sealed snapshot).
 // No framework, no network: sort, filter, search and detail views all run on the local data.
 //
-// Views: the ranked board (sortable, filterable, searchable), the live-token comparables, and
-// the model page, which states the formula and the calibration the snapshot produced.
+// Views: the ranked board (sortable, filterable, searchable), the live-token comparables (every
+// protocol whose record carries a token), the coverage view (the whole-universe partition: ranked,
+// live-token, set aside with reasons), and the model page, which states the formula and the
+// calibration the snapshot produced.
 (function () {
   'use strict';
   var D = window.RADAR;
@@ -57,17 +59,21 @@
   var fetched = D.source.match(/fetched (\d{4}-\d{2}-\d{2})/);
   document.getElementById('source').textContent = 'DefiLlama' + (fetched ? ' · fetched ' + fetched[1] : '');
   document.getElementById('modelver').textContent = D.model_version;
+  // The calibration's comps are the live-token protocols with a market cap the multiples were
+  // computed from — not the whole live list, most of which records no market cap.
+  var calComps = D.calibration.reduce(function (sum, c) { return sum + c.comps; }, 0);
   document.getElementById('globalmed').textContent =
-    'Global median multiple across ' + D.live_size + ' live comparables shown: ×' + D.global_median_multiple.toFixed(3) + '.';
+    'Global median multiple ×' + D.global_median_multiple.toFixed(3) + ', from ' + calComps +
+    ' live-token protocols with a market cap.';
 
   var totalImplied = D.rows.reduce(function (sum, r) { return sum + r.implied_value_usd; }, 0);
-  var watchRows = D.rows.filter(function (r) { return r.watchlist; }).length;
+  var cov = D.coverage;
   document.getElementById('stats').innerHTML =
-    stat('Protocols scanned', String(D.protocols_scanned), 'at or above $5M TVL') +
-    stat('Watchlist', String(D.watchlist_size), '≥ $50M TVL, records no token') +
-    stat('Board rows', String(D.board_size), watchRows + ' watchlist + ' + D.early_size + ' more') +
-    stat('Total implied value', money(totalImplied), 'across the whole board', true) +
-    stat('Model', D.model_version, 'category-calibrated, snapshot-derived');
+    stat('Protocols scanned', String(D.protocols_scanned), cov.ranked + ' ranked + ' + cov.live + ' live + ' + cov.set_aside + ' set aside') +
+    stat('Board rows', String(D.board_size), D.watchlist_size + ' watchlist + ' + D.early_size + ' early') +
+    stat('Live tokens', String(cov.live), cov.live_with_mcap + ' with a market cap, ' + cov.live_no_mcap + ' without one') +
+    stat('Set aside', String(cov.set_aside), cov.set_aside_exchange + ' exchanges · ' + cov.set_aside_versioned + ' versioned') +
+    stat('Total implied value', money(totalImplied), 'across the whole board', true);
   function stat(k, v, s, accent) {
     return '<div class="stat"><div class="k">' + esc(k) + '</div><div class="v' + (accent ? ' accent' : '') + '">' +
       esc(v) + '</div><div class="s">' + esc(s) + '</div></div>';
@@ -216,16 +222,42 @@
     return '<div class="fact"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
   }
 
-  // ---------------------------------------------------------------- live + calibration
+  // ---------------------------------------------------------------- live + coverage + calibration
 
+  document.getElementById('livecount').textContent =
+    'All ' + D.live.length + ' protocols whose record carries a token, by market cap — ' +
+    cov.live_with_mcap + ' record a market cap, ' + cov.live_no_mcap + ' record a token but no market cap.';
   document.getElementById('liverows').innerHTML = D.live.map(function (p) {
     var ratio = (p.mcap_usd !== null && p.tvl_usd) ? (p.mcap_usd / p.tvl_usd).toFixed(2) + '×' : '—';
     return '<tr><td><span class="name">' + esc(p.name) + '</span><br><span class="slug">' + esc(p.slug) + '</span>' +
       (p.category ? '<br><span class="badge">' + esc(p.category) + '</span>' : '') + '</td>' +
+      '<td class="num">' + (p.symbol ? esc(p.symbol) : '—') + '</td>' +
       '<td class="num">' + money(p.mcap_usd) + '</td>' +
       '<td class="num">' + money(p.tvl_usd) + '</td>' +
       '<td class="num">' + ratio + '</td>' +
       '<td class="num ' + pctClass(p.change_7d) + '">' + pct(p.change_7d) + '</td></tr>';
+  }).join('');
+
+  document.getElementById('coverrows').innerHTML =
+    coverRow('Ranked', cov.ranked, 'Pre-token protocols the board ranks, with a farm plan each.') +
+    coverRow('Live-token', cov.live, 'Records a token already; shown with the market\u2019s own values.') +
+    coverRow('Set aside', cov.set_aside, 'Pre-token, but an exchange or a versioned pool — listed below with the reason.') +
+    '<tr><td><span class="name">Total</span></td><td class="num"><b>' + cov.total + '</b></td><td>Every protocol in the snapshot. ' +
+    cov.ranked + ' + ' + cov.live + ' + ' + cov.set_aside + ' = ' + cov.total + '.</td></tr>';
+  function coverRow(bucket, n, meaning) {
+    return '<tr><td><span class="name">' + esc(bucket) + '</span></td><td class="num">' + n + '</td><td>' + esc(meaning) + '</td></tr>';
+  }
+
+  var reasonLabel = {
+    exchange: 'Exchange — a centralised exchange, not a launch candidate.',
+    versioned: 'Versioned pool — a version of another protocol, not a standalone launch.',
+  };
+  document.getElementById('setasidecount').textContent =
+    cov.set_aside + ' protocols: ' + cov.set_aside_exchange + ' exchanges, ' + cov.set_aside_versioned + ' versioned.';
+  document.getElementById('setasiderows').innerHTML = D.set_aside.map(function (p) {
+    return '<tr><td><span class="name">' + esc(p.name) + '</span><br><span class="slug">' + esc(p.slug) + '</span>' +
+      (p.category ? '<br><span class="badge">' + esc(p.category) + '</span>' : '') + '</td>' +
+      '<td>' + esc(reasonLabel[p.reason] || p.reason) + '</td></tr>';
   }).join('');
 
   document.getElementById('calrows').innerHTML = D.calibration.map(function (c) {
@@ -267,7 +299,7 @@
       if (k === 'chain' && v) { state.chain = v; chainSel.value = v; }
       if (k === 'watch' && v === '1') { state.watchOnly = true; document.getElementById('watchonly').checked = true; }
       if (k === 'q' && v) { state.q = v; document.getElementById('q').value = v; }
-      if (k === 'tab' && (v === 'live' || v === 'model')) showTab(v);
+      if (k === 'tab' && (v === 'live' || v === 'coverage' || v === 'model')) showTab(v);
     });
   }
 
