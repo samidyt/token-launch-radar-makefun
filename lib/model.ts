@@ -1,9 +1,19 @@
-// The token radar's model: one sealed snapshot of the protocol universe in, one ranked board out.
+// The token radar's model: one sealed snapshot of the protocol universe in, one ranked board out —
+// and an account of every protocol the snapshot holds.
 //
-// The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and every other
-// rankable pre-token protocol in the snapshot: the early rows the radar exists to find. A protocol is
-// pre-token when its record carries no token (no market cap, no CoinGecko id, no symbol). Live-token
-// protocols are kept apart and shown with the market's own values, never mixed into the ranked board.
+// radar-3 accounts for the whole snapshot: every protocol lands in exactly one of three buckets —
+// ranked (pre-token and rankable), live-token (its token already trades), or set aside with a
+// stated reason (an exchange, or a versioned pool of another protocol). On the kit snapshot that
+// is 289 + 416 + 53 = 758, asserted at run time, never assumed. The ranking formula is the
+// radar-2 formula unchanged, so board.json is byte-identical to the radar-2 board; what is new is
+// the accounting, the live-token view (all of them, not the top 24) and the set-aside view.
+//
+// The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and every
+// other rankable pre-token protocol in the snapshot: the early rows the radar exists to find. A
+// protocol is pre-token when its record carries no token (no market cap, no CoinGecko id, no
+// symbol). Live-token protocols are kept apart and shown with the market's own values, never mixed
+// into the ranked board. Pre-token protocols that are exchanges or versioned pools are set aside
+// with their reason stated, so the board never silently drops a protocol.
 //
 // Implied value follows only from the snapshot's own figures, in four factors:
 //
@@ -17,6 +27,11 @@
 //                      more wallets, worth up to +12%.
 //
 //   implied = max(1, round(tvl_usd x multiple x growthMult x maturityMult x breadthMult))
+//
+// Calibration, proved from the snapshot rather than taken from the v1 notes (which wrongly said
+// 24 comps and a x0.169 median — 24 was the old live view's display cap, not the comp count):
+// 128 live-token protocols carry both a market cap and TVL at or above the $5M minimum, and the
+// median of their market-cap / TVL ratios is 0.2138, so the global median multiple is x0.214.
 //
 // No protocol name is ever special-cased: the same function scores every row, and the dashboard
 // states every factor of every row so a reader can check the arithmetic.
@@ -78,10 +93,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-2';
-
-/** How many live-token protocols the Live token view carries, by market cap. */
-export const LIVE_ROWS = 24;
+export const MODEL_VERSION = 'radar-3';
 
 /** A farm step: the action, what it costs, and how long it takes. */
 export interface FarmStep {
@@ -149,6 +161,27 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
+/** A protocol set aside from the ranked board, with the reason it was set aside. */
+export interface SetAsideRow {
+  slug: string;
+  name: string;
+  category: string | null;
+  chains: string[];
+  tvl_usd: number;
+  change_7d: number | null;
+  reason: 'exchange' | 'versioned pool';
+}
+
+/** The snapshot's accounting: every protocol in exactly one bucket, the buckets summing to the whole. */
+export interface Partition {
+  ranked: number;
+  live_token: number;
+  set_aside: number;
+  exchanges: number;
+  versioned_pools: number;
+  total: number;
+}
+
 /** One category's calibrated multiple, for the dashboard's model section. */
 export interface CalibrationRow {
   category: string;
@@ -156,7 +189,7 @@ export interface CalibrationRow {
   comps: number;
 }
 
-/** Everything the dashboard needs: the board, the live set, the calibration and the model it runs. */
+/** Everything the dashboard needs: the board, the live set, the set-aside set, the calibration and the model it runs. */
 export interface RadarData {
   as_of: string;
   source: string;
@@ -164,14 +197,17 @@ export interface RadarData {
   model: ModelConstants;
   model_version: string;
   global_median_multiple: number;
+  calibration_comps: number;
   calibration: CalibrationRow[];
   protocols_scanned: number;
   watchlist_size: number;
   board_size: number;
   early_size: number;
   live_size: number;
+  partition: Partition;
   rows: RadarRow[];
   live: LiveRow[];
+  aside: SetAsideRow[];
 }
 
 /** Why the snapshot is not one this model can score. */
@@ -287,6 +323,55 @@ export function isPreToken(p: SnapshotProtocol): boolean {
 /** Whether a protocol is one the board may rank: pre-token, not an exchange, not a versioned pool. */
 export function isRankable(p: SnapshotProtocol): boolean {
   return isPreToken(p) && p.category !== 'CEX' && !VERSIONED.test(p.name);
+}
+
+/** Why a pre-token protocol is set aside instead of ranked, or null when it is rankable. */
+export function setAsideReason(p: SnapshotProtocol): 'exchange' | 'versioned pool' | null {
+  if (!isPreToken(p)) return null;
+  if (p.category === 'CEX') return 'exchange';
+  if (VERSIONED.test(p.name)) return 'versioned pool';
+  return null;
+}
+
+/**
+ * The snapshot's partition: every protocol in exactly one bucket — ranked, live-token, or set
+ * aside with its reason. The buckets are disjoint by construction (a protocol is pre-token or it
+ * is not; a pre-token protocol is rankable or it has exactly one set-aside reason) and complete
+ * (every protocol is classified), so ranked + live-token + set-aside always equals the snapshot.
+ */
+export function partitionSnapshot(snapshot: Snapshot): {
+  ranked: SnapshotProtocol[];
+  live: SnapshotProtocol[];
+  aside: { protocol: SnapshotProtocol; reason: 'exchange' | 'versioned pool' }[];
+  partition: Partition;
+} {
+  const ranked: SnapshotProtocol[] = [];
+  const live: SnapshotProtocol[] = [];
+  const aside: { protocol: SnapshotProtocol; reason: 'exchange' | 'versioned pool' }[] = [];
+  for (const p of snapshot.protocols) {
+    if (!isPreToken(p)) {
+      live.push(p);
+      continue;
+    }
+    const reason = setAsideReason(p);
+    if (reason !== null) aside.push({ protocol: p, reason });
+    else ranked.push(p);
+  }
+  const exchanges = aside.filter((a) => a.reason === 'exchange').length;
+  const versionedPools = aside.length - exchanges;
+  return {
+    ranked,
+    live,
+    aside,
+    partition: {
+      ranked: ranked.length,
+      live_token: live.length,
+      set_aside: aside.length,
+      exchanges,
+      versioned_pools: versionedPools,
+      total: snapshot.protocols.length,
+    },
+  };
 }
 
 /** The snapshot's protocol by slug. */
@@ -462,12 +547,11 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   ];
 }
 
-/** The live-token protocols, by market cap, for the dashboard's Live token view. */
+/** Every live-token protocol, by market cap, for the dashboard's Live token view. */
 export function liveRows(snapshot: Snapshot): LiveRow[] {
   return snapshot.protocols
-    .filter((p) => !isPreToken(p) && p.category !== 'CEX')
-    .sort((a, b) => (b.mcap_usd ?? 0) - (a.mcap_usd ?? 0) || b.tvl_usd - a.tvl_usd)
-    .slice(0, LIVE_ROWS)
+    .filter((p) => !isPreToken(p))
+    .sort((a, b) => (b.mcap_usd ?? 0) - (a.mcap_usd ?? 0) || b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : 1))
     .map((p) => ({
       slug: p.slug,
       name: p.name,
@@ -476,6 +560,22 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
       tvl_usd: p.tvl_usd,
       mcap_usd: p.mcap_usd,
       change_7d: p.change_7d,
+    }));
+}
+
+/** Every protocol set aside from the ranked board, by TVL, with the reason it was set aside. */
+export function asideRows(snapshot: Snapshot): SetAsideRow[] {
+  return snapshot.protocols
+    .filter((p) => setAsideReason(p) !== null)
+    .sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : 1))
+    .map((p) => ({
+      slug: p.slug,
+      name: p.name,
+      category: p.category,
+      chains: p.chains,
+      tvl_usd: p.tvl_usd,
+      change_7d: p.change_7d,
+      reason: setAsideReason(p)!,
     }));
 }
 
@@ -501,18 +601,36 @@ export function radarRow(row: BoardRow, watchlist: Set<string>): RadarRow {
   };
 }
 
-/** Everything the dashboard renders, from the snapshot. */
+/** Everything the dashboard renders, from the snapshot — with the partition asserted, not assumed. */
 export function buildRadar(
   snapshot: Snapshot,
   model: ModelConstants = MODEL,
 ): { board: BoardRow[]; radar: RadarData } {
   const { board, calibration } = buildBoard(snapshot, model);
+  const { partition } = partitionSnapshot(snapshot);
   const live = liveRows(snapshot);
+  const aside = asideRows(snapshot);
+  // The partition must account for the whole snapshot: ranked + live + aside, disjoint, complete.
+  // The buckets are built disjoint by construction, but the board is built by a separate pass, so
+  // check the three views against each other here rather than trusting them to agree.
+  const seen = new Set<string>();
+  for (const slug of [...board.map((r) => r.slug), ...live.map((r) => r.slug), ...aside.map((r) => r.slug)]) {
+    if (seen.has(slug)) throw new SnapshotError(`the snapshot's partition puts ${slug} in two buckets`);
+    seen.add(slug);
+  }
+  if (seen.size !== snapshot.protocols.length || partition.ranked !== board.length) {
+    throw new SnapshotError(
+      `the snapshot's partition accounts for ${seen.size} of ${snapshot.protocols.length} protocols: ${board.length} ranked + ${live.length} live + ${aside.length} set aside`,
+    );
+  }
   const watchSet = new Set(snapshot.watchlist);
   const early = board.filter((r) => !watchSet.has(r.slug)).length;
   const calibrationRows: CalibrationRow[] = [...calibration.multiples.entries()]
     .map(([category, v]) => ({ category, multiple: round4(v.multiple), comps: v.comps }))
     .sort((a, b) => (a.category < b.category ? -1 : 1));
+  // The comps behind the global median: every live-token protocol with a market cap and TVL at or
+  // above the minimum — 128 on this snapshot, not the 24 the old live view used to show.
+  const calibrationComps = calibrationRows.reduce((sum, c) => sum + c.comps, 0);
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -520,14 +638,17 @@ export function buildRadar(
     model,
     model_version: MODEL_VERSION,
     global_median_multiple: round4(calibration.globalMedian),
+    calibration_comps: calibrationComps,
     calibration: calibrationRows,
     protocols_scanned: snapshot.protocols.length,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: early,
     live_size: live.length,
+    partition,
     rows: board.map((r) => radarRow(r, watchSet)),
     live,
+    aside,
   };
   return { board, radar };
 }

@@ -1,11 +1,13 @@
-// Replicates the token-radar-01 gate's seven rows against a built /output, locally.
-// The server grades every entry (RULES.txt: "There is no local grade"), so this is a
-// pre-submit rehearsal, not the grade: it reads the same files the sealed scorer reads
-// and applies the rules RULES.txt states, including a byte comparison of dossier.json
-// against a fresh buildDossier call with the gate's own caps ({text_max_bytes: 65536}).
+// Replicates the token-radar-01 gate's seven rows against a built /output, locally, plus an
+// eighth row this entry holds itself to: the snapshot partition (ranked + live-token + set
+// aside = the whole snapshot, disjoint, with the set-aside reasons counted). The server grades
+// every entry (RULES.txt: "There is no local grade"), so this is a pre-submit rehearsal, not
+// the grade: it reads the same files the sealed scorer reads and applies the rules RULES.txt
+// states, including a byte comparison of dossier.json against a fresh buildDossier call with
+// the gate's own caps ({text_max_bytes: 65536}).
 //
 // Usage: node tools/verify-output.mjs <out-dir> <snapshot.json>
-// Exit 0 when all seven rows pass; prints each row PASS/FAIL with its detail.
+// Exit 0 when all eight rows pass; prints each row PASS/FAIL with its detail.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -151,6 +153,70 @@ function jpegDims(buf) {
     err ?? `dossier.json ${written.length} bytes, ${match ? 'byte-identical to a fresh buildDossier' : 'DIFFERS from a fresh buildDossier'}`);
 }
 
+// 8. partition: data.js accounts for the whole snapshot — ranked + live-token + set aside =
+//    the snapshot, disjoint, with the set-aside reasons counted — and the counts re-derived
+//    here from the snapshot agree with what the entry claims.
+{
+  const src = readFileSync(join(out, 'data.js'), 'utf8');
+  const prefix = 'window.RADAR=';
+  let radar = null;
+  let bad = null;
+  if (!src.startsWith(prefix)) {
+    bad = 'data.js does not start with window.RADAR=';
+  } else {
+    try {
+      radar = JSON.parse(src.slice(prefix.length).replace(/;\s*$/, ''));
+    } catch {
+      bad = 'data.js is not parseable JSON after its prefix';
+    }
+  }
+  if (radar !== null) {
+    const p = radar.partition;
+    const VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
+    const isPre = (q) => q.mcap_usd === null && q.gecko_id === null && q.symbol === null;
+    // Re-derive the partition from the snapshot, independently of the entry's own code.
+    let ranked = 0;
+    let live = 0;
+    let exchanges = 0;
+    let versioned = 0;
+    for (const q of snapshot.protocols) {
+      if (!isPre(q)) { live++; continue; }
+      if (q.category === 'CEX') { exchanges++; continue; }
+      if (VERSIONED.test(q.name)) { versioned++; continue; }
+      ranked++;
+    }
+    const aside = exchanges + versioned;
+    const total = snapshot.protocols.length;
+    if (p.ranked !== ranked || p.live_token !== live || p.set_aside !== aside ||
+      p.exchanges !== exchanges || p.versioned_pools !== versioned || p.total !== total) {
+      bad = `data.js claims ${p.ranked}+${p.live_token}+${p.set_aside}=${p.total}, snapshot re-derives ${ranked}+${live}+${aside}=${total}`;
+    } else if (p.ranked + p.live_token + p.set_aside !== p.total) {
+      bad = `partition does not sum: ${p.ranked}+${p.live_token}+${p.set_aside} != ${p.total}`;
+    } else if (radar.rows.length !== p.ranked || radar.live.length !== p.live_token || radar.aside.length !== p.set_aside) {
+      bad = `data.js holds ${radar.rows.length} board rows, ${radar.live.length} live rows, ${radar.aside.length} aside rows`;
+    } else if (board.length !== p.ranked) {
+      bad = `board.json holds ${board.length} rows, partition says ${p.ranked} ranked`;
+    } else {
+      // Disjointness + completeness across the three views, against the snapshot's slugs.
+      const seen = new Set();
+      let overlap = null;
+      for (const r of [...radar.rows, ...radar.live, ...radar.aside]) {
+        if (seen.has(r.slug)) { overlap = r.slug; break; }
+        seen.add(r.slug);
+      }
+      const asideReasons = radar.aside.filter((r) => r.reason === 'exchange').length;
+      const asideVersioned = radar.aside.filter((r) => r.reason === 'versioned pool').length;
+      if (overlap !== null) bad = `${overlap} appears in two views`;
+      else if (seen.size !== total) bad = `the three views cover ${seen.size} of ${total} protocols`;
+      else if (![...seen].every((s) => slugSet.has(s))) bad = 'a view names a slug the snapshot does not carry';
+      else if (asideReasons !== exchanges || asideVersioned !== versioned) bad = `aside reasons are ${asideReasons} exchange / ${asideVersioned} versioned pool, snapshot says ${exchanges} / ${versioned}`;
+    }
+  }
+  const p = radar === null ? null : radar.partition;
+  row('partition', bad === null,
+    bad ?? `${p.ranked} ranked + ${p.live_token} live-token + ${p.set_aside} set aside (${p.exchanges} exchanges, ${p.versioned_pools} versioned pools) = ${p.total}, disjoint and complete`);
+}
+
 const failed = results.filter((r) => !r.ok);
-console.log(failed.length === 0 ? `\n7/7 gate rows pass.` : `\n${7 - failed.length}/7 gate rows pass.`);
+console.log(failed.length === 0 ? `\n8/8 gate rows pass.` : `\n${8 - failed.length}/8 gate rows pass.`);
 process.exit(failed.length === 0 ? 0 : 1);

@@ -8,10 +8,11 @@
 </head>
 <body>
 <!--
-  TOKEN RADAR (model radar-2). A reader's tool, not a prediction: every row is a protocol whose
+  TOKEN RADAR (model radar-3). A reader's tool, not a prediction: every row is a protocol whose
   DefiLlama record carries no token, ranked by an implied value derived from the sealed snapshot's
   own figures (TVL, 7-day growth, age, chains) and a category multiple calibrated from the
   snapshot's live-token protocols. Nothing here predicts whether or when a token is issued.
+  The page accounts for the whole snapshot: 289 ranked + 416 live-token + 53 set aside = 758.
 -->
 <header class="top">
   <div class="brand">
@@ -25,10 +26,12 @@
 </header>
 
 <section class="stats" id="stats" aria-label="Board summary"></section>
+<p class="accounting" id="accounting" aria-label="Snapshot accounting"></p>
 
 <nav class="tabs" aria-label="Views">
   <button class="tab active" data-tab="board" type="button">Board</button>
   <button class="tab" data-tab="live" type="button">Live tokens</button>
+  <button class="tab" data-tab="aside" type="button">Set aside</button>
   <button class="tab" data-tab="model" type="button">How the model works</button>
 </nav>
 
@@ -77,15 +80,33 @@
   </section>
 
   <section id="tab-live" class="panel">
-    <p class="lede">Protocols whose token already trades. Shown with the market's own values — market cap and
-    TVL — never mixed into the ranked board. These are the live comparables the model calibrates
-    its category multiples from.</p>
+    <p class="lede">Every protocol whose token already trades — all of them, not a top slice. Shown with the
+    market's own values — market cap and TVL — never mixed into the ranked board. These are the live
+    comparables the model calibrates its category multiples from; the 128 of them that carry both a
+    market cap and TVL set the global median multiple.</p>
+    <p class="count" id="livecount"></p>
     <div class="table-wrap">
       <table id="livetable">
         <thead>
           <tr><th>Protocol</th><th class="num">Market cap</th><th class="num">TVL</th><th class="num">MCap / TVL</th><th class="num">7d</th></tr>
         </thead>
         <tbody id="liverows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-aside" class="panel">
+    <p class="lede">Pre-token protocols the board deliberately does not rank, with the reason each one was set
+    aside. Exchanges are businesses, not launch candidates; a versioned pool (a name ending in a
+    release, like V2 or V3) is one pool of another protocol, not a protocol of its own. Nothing is
+    dropped silently: these <span id="asidecount"></span> plus the ranked board and the live-token
+    view account for every protocol in the snapshot.</p>
+    <div class="table-wrap">
+      <table id="asidetable">
+        <thead>
+          <tr><th>Protocol</th><th>Reason set aside</th><th class="num">TVL</th><th class="num">7d</th></tr>
+        </thead>
+        <tbody id="asiderows"></tbody>
       </table>
     </div>
   </section>
@@ -113,6 +134,14 @@
         <tbody id="calrows"></tbody>
       </table>
     </div>
+    <h3>Accounting for the whole snapshot</h3>
+    <p class="lede" id="partitionline"></p>
+    <p class="lede">The ranked board is the watchlist (40) plus every other rankable pre-token protocol (249).
+    The live-token view holds every protocol whose token already trades, including the 128 with a
+    market cap that calibrate the multiples. The set-aside view holds the pre-token protocols the
+    board does not rank: exchanges, and versioned pools. No protocol appears in two views, and no
+    protocol is missing — the run refuses to write a board whose three views do not sum to the
+    snapshot.</p>
     <h3>What the radar does not do</h3>
     <ul class="notes">
       <li>It does not predict whether or when a protocol issues a token. A high implied value means the
@@ -121,12 +150,14 @@
       miss a token, and wrapped, staked or bridged products of tokens that already trade are left out.</li>
       <li>Farm plans are generic steps derived from each protocol's category, chains, TVL and age. They
       are not financial advice; check the protocol's own pages before moving funds.</li>
+      <li>Exchanges and versioned pools are set aside, not ranked: an exchange's implied "launch value"
+      would be a category error, and a V2 pool is one pool of a protocol the board may already rank.</li>
     </ul>
   </section>
 </main>
 
 <footer>
-  <p>Token Radar · model <span id="modelver">radar-2</span> · Data: a sealed DefiLlama snapshot fetched once for this
+  <p>Token Radar · model <span id="modelver">radar-3</span> · Data: a sealed DefiLlama snapshot fetched once for this
   board; it does not update. Implied values are this entry's own claims, never make.fun's.</p>
 </footer>
 

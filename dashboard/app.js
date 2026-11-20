@@ -1,8 +1,9 @@
 // Token Radar dashboard: renders window.RADAR (written by main.ts from the sealed snapshot).
 // No framework, no network: sort, filter, search and detail views all run on the local data.
 //
-// Views: the ranked board (sortable, filterable, searchable), the live-token comparables, and
-// the model page, which states the formula and the calibration the snapshot produced.
+// Views: the ranked board (sortable, filterable, searchable), the live-token comparables (all of
+// them), the set-aside protocols with their reasons, and the model page, which states the formula,
+// the calibration the snapshot produced, and the accounting of the whole snapshot.
 (function () {
   'use strict';
   var D = window.RADAR;
@@ -58,16 +59,27 @@
   document.getElementById('source').textContent = 'DefiLlama' + (fetched ? ' · fetched ' + fetched[1] : '');
   document.getElementById('modelver').textContent = D.model_version;
   document.getElementById('globalmed').textContent =
-    'Global median multiple across ' + D.live_size + ' live comparables shown: ×' + D.global_median_multiple.toFixed(3) + '.';
+    'Global median multiple across ' + D.calibration_comps + ' live comparables with a market cap: ×' + D.global_median_multiple.toFixed(3) + '.';
 
   var totalImplied = D.rows.reduce(function (sum, r) { return sum + r.implied_value_usd; }, 0);
   var watchRows = D.rows.filter(function (r) { return r.watchlist; }).length;
+  var P = D.partition;
   document.getElementById('stats').innerHTML =
     stat('Protocols scanned', String(D.protocols_scanned), 'at or above $5M TVL') +
     stat('Watchlist', String(D.watchlist_size), '≥ $50M TVL, records no token') +
     stat('Board rows', String(D.board_size), watchRows + ' watchlist + ' + D.early_size + ' more') +
     stat('Total implied value', money(totalImplied), 'across the whole board', true) +
     stat('Model', D.model_version, 'category-calibrated, snapshot-derived');
+  // The accounting headline: every protocol in the snapshot, in exactly one bucket.
+  document.getElementById('accounting').textContent =
+    'All ' + P.total + ' snapshot protocols accounted for: ' + P.ranked + ' ranked · ' +
+    P.live_token + ' live-token · ' + P.set_aside + ' set aside (' + P.exchanges +
+    ' exchanges, ' + P.versioned_pools + ' versioned pools).';
+  document.getElementById('partitionline').textContent =
+    'The snapshot holds ' + P.total + ' protocols: ' + P.ranked + ' ranked on the board, ' +
+    P.live_token + ' live-token, and ' + P.set_aside + ' set aside — ' + P.exchanges +
+    ' exchanges and ' + P.versioned_pools + ' versioned pools. ' + P.ranked + ' + ' +
+    P.live_token + ' + ' + P.set_aside + ' = ' + P.total + '.';
   function stat(k, v, s, accent) {
     return '<div class="stat"><div class="k">' + esc(k) + '</div><div class="v' + (accent ? ' accent' : '') + '">' +
       esc(v) + '</div><div class="s">' + esc(s) + '</div></div>';
@@ -216,8 +228,10 @@
     return '<div class="fact"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
   }
 
-  // ---------------------------------------------------------------- live + calibration
+  // ---------------------------------------------------------------- live + aside + calibration
 
+  document.getElementById('livecount').textContent =
+    'Showing all ' + D.live.length + ' live-token protocols, by market cap.';
   document.getElementById('liverows').innerHTML = D.live.map(function (p) {
     var ratio = (p.mcap_usd !== null && p.tvl_usd) ? (p.mcap_usd / p.tvl_usd).toFixed(2) + '×' : '—';
     return '<tr><td><span class="name">' + esc(p.name) + '</span><br><span class="slug">' + esc(p.slug) + '</span>' +
@@ -230,6 +244,17 @@
 
   document.getElementById('calrows').innerHTML = D.calibration.map(function (c) {
     return '<tr><td>' + esc(c.category) + '</td><td class="num">×' + c.multiple.toFixed(3) + '</td><td class="num">' + c.comps + '</td></tr>';
+  }).join('');
+
+  document.getElementById('asidecount').textContent =
+    D.aside.length + ' protocols (' + D.partition.exchanges + ' exchanges, ' +
+    D.partition.versioned_pools + ' versioned pools)';
+  document.getElementById('asiderows').innerHTML = D.aside.map(function (p) {
+    return '<tr><td><span class="name">' + esc(p.name) + '</span><br><span class="slug">' + esc(p.slug) + '</span>' +
+      (p.category ? '<br><span class="badge">' + esc(p.category) + '</span>' : '') + '</td>' +
+      '<td><span class="badge aside-' + (p.reason === 'exchange' ? 'cex' : 'ver') + '">' + esc(p.reason) + '</span></td>' +
+      '<td class="num">' + money(p.tvl_usd) + '</td>' +
+      '<td class="num ' + pctClass(p.change_7d) + '">' + pct(p.change_7d) + '</td></tr>';
   }).join('');
 
   // ---------------------------------------------------------------- controls + hash routing
@@ -267,7 +292,7 @@
       if (k === 'chain' && v) { state.chain = v; chainSel.value = v; }
       if (k === 'watch' && v === '1') { state.watchOnly = true; document.getElementById('watchonly').checked = true; }
       if (k === 'q' && v) { state.q = v; document.getElementById('q').value = v; }
-      if (k === 'tab' && (v === 'live' || v === 'model')) showTab(v);
+      if (k === 'tab' && (v === 'live' || v === 'model' || v === 'aside' || v === 'board')) showTab(v);
     });
   }
 

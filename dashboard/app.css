@@ -94,6 +94,18 @@ h1 {
 .stat .v.accent { color: var(--accent); }
 .stat .s { color: var(--faint); font-size: 12px; margin-top: 2px; }
 
+/* Accounting headline: the whole snapshot, in one line. */
+.accounting {
+  margin: 12px 2px 0;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13.5px;
+}
+
 /* Tabs */
 .tabs { display: flex; gap: 4px; margin: 18px 0 0; border-bottom: 1px solid var(--line); }
 .tab {
@@ -176,6 +188,8 @@ tbody tr:last-child td { border-bottom: none; }
   white-space: nowrap;
 }
 .badge.watch { border-color: var(--amber); color: var(--amber); }
+.badge.aside-cex { border-color: var(--red); color: var(--red); }
+.badge.aside-ver { border-color: var(--accent); color: var(--accent); }
 .up { color: var(--green); }
 .down { color: var(--red); }
 .flat { color: var(--muted); }

@@ -10,6 +10,8 @@
 // The dashboard is a static page, no framework and no network: dashboard/index.html, app.css and
 // app.js read /output/data.js, which this program writes from the same board. Every row carries
 // its model breakdown and its farm plan; the page sorts, filters and opens a detail view per row.
+// The page also accounts for the whole snapshot — ranked, live-token and set aside — from the
+// same data, so the headline numbers and the board can never disagree.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
@@ -80,6 +82,16 @@ if (!dash.includes('index.html')) {
   process.stderr.write('token radar: dashboard/ holds no index.html\n');
   process.exit(1);
 }
+// The gate refuses a dashboard past its caps; refuse here, naming the breach, before the dossier.
+if (dash.length > DASHBOARD_CAPS.max_files) {
+  process.stderr.write(`token radar: dashboard/ holds ${dash.length} files, past the gate's cap of ${DASHBOARD_CAPS.max_files}\n`);
+  process.exit(1);
+}
+const dashBytes = dash.reduce((sum, name) => sum + statSync(join(out, 'dashboard', name)).size, 0);
+if (dashBytes > DASHBOARD_CAPS.max_bytes) {
+  process.stderr.write(`token radar: dashboard/ is ${dashBytes} bytes, past the gate's cap of ${DASHBOARD_CAPS.max_bytes} bytes\n`);
+  process.exit(1);
+}
 const shots = copyTree(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3) {
   process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`);
@@ -91,14 +103,36 @@ for (const name of shots) {
     process.exit(1);
   }
 }
+// Fail fast on the gate's screenshot caps here, with a message that names the file, instead of
+// letting buildDossier refuse the whole run further down with less context.
+if (shots.length > SCREENSHOT_CAPS.max) {
+  process.stderr.write(`token radar: screenshots/ holds ${shots.length} images, past the gate's cap of ${SCREENSHOT_CAPS.max}\n`);
+  process.exit(1);
+}
+for (const name of shots) {
+  const size = statSync(join(out, 'screenshots', name)).size;
+  if (size > SCREENSHOT_CAPS.max_bytes) {
+    process.stderr.write(`token radar: screenshots/${name} is ${size} bytes, past the gate's cap of ${SCREENSHOT_CAPS.max_bytes} bytes\n`);
+    process.exit(1);
+  }
+}
 
 // The dossier is written last: the scorer rebuilds it from this /output and compares bytes.
+const DOSSIER_MAX_BYTES = 1_572_864; // 1.5 MiB: the gate refuses a dossier past it.
+const dossierPath = join(out, 'dossier.json');
 writeFileSync(
-  join(out, 'dossier.json'),
+  dossierPath,
   buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: DASHBOARD_CAPS }),
 );
+const dossierBytes = statSync(dossierPath).size;
+if (dossierBytes > DOSSIER_MAX_BYTES) {
+  process.stderr.write(`token radar: dossier.json is ${dossierBytes} bytes, past the gate's cap of ${DOSSIER_MAX_BYTES} bytes\n`);
+  process.exit(1);
+}
 
+const p = radar.partition;
 process.stdout.write(
-  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
+  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early)\n` +
+    `token radar: accounted for ${p.total}: ${p.ranked} ranked + ${p.live_token} live-token + ${p.set_aside} set aside (${p.exchanges} exchanges, ${p.versioned_pools} versioned pools)\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );
